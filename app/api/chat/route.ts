@@ -53,11 +53,14 @@ export async function POST(req: Request) {
       .reverse()
       .find((message) => message.role === 'user');
 
-    const lastUserText =
-      lastUserMessage?.parts
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join(' ') ?? '';
+   const lastUserText =
+  lastUserMessage?.parts
+    .filter(
+      (part): part is Extract<typeof part, { type: 'text' }> =>
+        part.type === 'text',
+    )
+    .map((part) => part.text)
+    .join(' ') ?? '';
 
     const asksForService =
       /\b(facial|massage|nails|manicure|pedicure|hair|coloring|colouring|service|services|treatment|treatments|recommend|recommendation|beauty)\b/i.test(
