@@ -16,13 +16,13 @@ Originally built for assignment FE-05 (Foundations: scaffold, Tailwind, Vercel d
 
 ## FE-07: Generative UI
 
-The Ask Aura assistant uses a server-side tool named `recommendService` to recommend beauty services.
+The Ask Aura assistant uses a server-side tool named `recommendService` to check service availability and return recommendations.
 
 ### Tool Contract
 
 **Tool name:** `recommendService`
 
-**Purpose:** Recommend an existing Aura Beauty Center service based on the customer's request.
+**Purpose:** Check whether a requested beauty service is available at Aura Beauty Center. If available, return its details. Otherwise, return a clear unavailable result.
 
 **Input schema:**
 
@@ -31,14 +31,18 @@ The Ask Aura assistant uses a server-side tool named `recommendService` to recom
 | `category` | `string` | The requested beauty service category. |
 
 **Supported categories:**
+
 - `facial`
 - `massage`
 - `nails`
 
-**Return shape:**
+### Return Shape
+
+For an available service:
 
 ```ts
 {
+  available: true;
   serviceName: string;
   description: string;
   duration: string;
@@ -46,10 +50,11 @@ The Ask Aura assistant uses a server-side tool named `recommendService` to recom
 }
 ```
 
-**Example result:**
+Example:
 
 ```json
 {
+  "available": true,
   "serviceName": "Signature Facial",
   "description": "A facial treatment designed around the customer's skincare needs.",
   "duration": "60 minutes",
@@ -57,7 +62,27 @@ The Ask Aura assistant uses a server-side tool named `recommendService` to recom
 }
 ```
 
-**Error behavior:** If the requested category does not match a supported service, the tool throws an error. The chat UI is designed to display tool execution errors separately from successful recommendations.
+For an unavailable service:
+
+```ts
+{
+  available: false;
+  requestedCategory: string;
+  message: string;
+}
+```
+
+Example:
+
+```json
+{
+  "available": false,
+  "requestedCategory": "hair coloring",
+  "message": "This service is not currently available at Aura Beauty Center."
+}
+```
+
+**Error behavior:** Unsupported categories return an `available: false` result rather than throwing an exception. This allows the assistant to explain that the requested service is unavailable and suggest supported alternatives. Unexpected tool execution failures are handled separately by the chat UI.
 
 ### Tool UI States
 
@@ -65,8 +90,10 @@ The chat interface distinguishes these tool lifecycle states:
 
 - `input-streaming` — The tool input is being prepared.
 - `input-available` — The input is available and the tool is ready to execute.
-- `output-available` — The tool completed successfully and the result is rendered as a service recommendation card.
-- `output-error` — The tool execution failed and an error message is displayed.
+- `output-available` — The tool returned a result, which is rendered as either a service recommendation card or an unavailable-service card.
+- `output-error` — Tool execution failed and an error message is displayed.
+
+After receiving the tool result, the assistant can also provide a natural-language response to the customer.
 
 ## Run Locally
 
