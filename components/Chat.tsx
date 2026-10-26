@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState } from 'react';
@@ -60,9 +61,9 @@ export default function Chat() {
         {messages.map((message) => (
           <div key={message.id} className="space-y-3">
             {message.parts.map((rawPart, index) => {
-              // AI SDK message parts can contain text or tool results.
               const part = rawPart as any;
 
+              // Display normal user and assistant text.
               if (part.type === 'text') {
                 if (!part.text) return null;
 
@@ -80,9 +81,15 @@ export default function Chat() {
                 );
               }
 
+              // Ignore tools other than recommendService.
               if (part.type !== 'tool-recommendService') {
                 return null;
               }
+
+              const output = part.output;
+              const isUnavailable =
+                part.state === 'output-available' &&
+                output?.available === false;
 
               return (
                 <div
@@ -90,7 +97,9 @@ export default function Chat() {
                   className="mr-auto w-full max-w-[90%] rounded-xl border border-forest/15 bg-white p-4 text-sm text-forest shadow-sm sm:max-w-[85%]"
                 >
                   <p className="font-display text-lg italic">
-                    Aura Service Recommendation
+                    {isUnavailable
+                      ? 'Service Availability'
+                      : 'Aura Service Recommendation'}
                   </p>
 
                   {part.state === 'input-streaming' && (
@@ -107,7 +116,7 @@ export default function Chat() {
                   {part.state === 'input-available' && (
                     <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
                       <p className="font-medium">
-                        Finding a suitable service
+                        Checking service availability
                       </p>
                       <p className="mt-1">
                         Requested category:{' '}
@@ -119,29 +128,45 @@ export default function Chat() {
                     </div>
                   )}
 
-                  {part.state === 'output-available' && (
-                    <div className="mt-3 rounded-lg border border-forest/15 bg-cream p-4">
-                      <p className="text-xs uppercase tracking-wider text-forest/60">
-                        Recommended service
-                      </p>
+                  {part.state === 'output-available' &&
+                    output?.available === true && (
+                      <div className="mt-3 rounded-lg border border-forest/15 bg-cream p-4">
+                        <p className="text-xs uppercase tracking-wider text-forest/60">
+                          Recommended service
+                        </p>
 
-                      <h3 className="mt-2 font-display text-xl">
-                        {part.output?.serviceName}
-                      </h3>
+                        <h3 className="mt-2 font-display text-xl">
+                          {output.serviceName}
+                        </h3>
 
-                      <p className="mt-2 leading-6">
-                        {part.output?.description}
-                      </p>
+                        <p className="mt-2 leading-6">
+                          {output.description}
+                        </p>
 
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-forest/10 pt-3">
-                        <span className="rounded-full bg-white px-3 py-1 text-xs capitalize">
-                          {part.output?.category}
-                        </span>
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-forest/10 pt-3">
+                          <span className="rounded-full bg-white px-3 py-1 text-xs capitalize">
+                            {output.category}
+                          </span>
 
-                        <span className="text-xs text-forest/70">
-                          Duration: {part.output?.duration}
-                        </span>
+                          <span className="text-xs text-forest/70">
+                            Duration: {output.duration}
+                          </span>
+                        </div>
                       </div>
+                    )}
+
+                  {isUnavailable && (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-red-800"
+                    >
+                      <p className="font-medium">
+                        This service is currently unavailable.
+                      </p>
+                      <p className="mt-1">
+                        {output.message ||
+                          'We could not find this service in our current list.'}
+                      </p>
                     </div>
                   )}
 
