@@ -1,199 +1,43 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-
-type Message = {
-  id: number;
-  role: 'user' | 'assistant';
-  text: string;
-};
+import { useState } from 'react';
+import { useChat } from '@ai-sdk/react';
+import { DefaultChatTransport } from 'ai';
 
 export default function Chat() {
-  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [isThinking, setIsThinking] = useState(false);
-  const [isAtBottom, setIsAtBottom] = useState(true);
-  const [error, setError] = useState(false);
 
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
+  const {
+    messages,
+    sendMessage,
+    status,
+    stop,
+    error,
+  } = useChat({
+    transport: new DefaultChatTransport({
+      api: '/api/chat',
+    }),
+  });
 
-  useEffect(() => {
-    if (!isAtBottom) return;
-
-    messagesEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-    });
-  }, [messages, isThinking, isAtBottom]);
-
-  const handleScroll = () => {
-    const container = messagesContainerRef.current;
-
-    if (!container) return;
-
-    const distanceFromBottom =
-      container.scrollHeight -
-      container.scrollTop -
-      container.clientHeight;
-
-    setIsAtBottom(distanceFromBottom < 40);
-  };
-
-  const scrollToLatest = () => {
-    messagesEndRef.current?.scrollIntoView({
-      behavior: 'smooth',
-    });
-
-    setIsAtBottom(true);
-  };
+  const isThinking =
+    status === 'submitted' || status === 'streaming';
 
   const handleSubmit = async (
-    e: React.FormEvent<HTMLFormElement>
+    event: React.FormEvent<HTMLFormElement>,
   ) => {
-    e.preventDefault();
+    event.preventDefault();
 
     const text = input.trim();
 
     if (!text || isThinking) return;
 
-    setError(false);
-
-    const userMessage: Message = {
-      id: Date.now(),
-      role: 'user',
-      text,
-    };
-
-    const assistantMessage: Message = {
-      id: Date.now() + 1,
-      role: 'assistant',
-      text: '',
-    };
-
-    setMessages((current) => [
-      ...current,
-      userMessage,
-      assistantMessage,
-    ]);
-
     setInput('');
-    setIsThinking(true);
-    setIsAtBottom(true);
-
-    const controller = new AbortController();
-
-    abortControllerRef.current = controller;
 
     try {
-      const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messages: [
-            ...messages,
-            {
-              role: 'user',
-              parts: [
-                {
-                  type: 'text',
-                  text,
-                },
-              ],
-            },
-          ],
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error('Something went wrong.');
-      }
-
-      if (!response.body) {
-        throw new Error('No response stream available.');
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      let accumulatedText = '';
-
-      while (true) {
-        const { value, done } = await reader.read();
-
-        if (done) break;
-
-        const chunk = decoder.decode(value, {
-          stream: true,
-        });
-
-        accumulatedText += chunk;
-
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantMessage.id
-              ? {
-                  ...message,
-                  text: accumulatedText,
-                }
-              : message
-          )
-        );
-      }
-
-      const finalChunk = decoder.decode();
-
-      if (finalChunk) {
-        accumulatedText += finalChunk;
-
-        setMessages((current) =>
-          current.map((message) =>
-            message.id === assistantMessage.id
-              ? {
-                  ...message,
-                  text: accumulatedText,
-                }
-              : message
-          )
-        );
-      }
-    } catch (error) {
-      if (
-        error instanceof DOMException &&
-        error.name === 'AbortError'
-      ) {
-        return;
-      }
-
-      console.error('CHAT ERROR:', error);
-
-      setError(true);
-
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === assistantMessage.id
-            ? {
-                ...message,
-                text: 'Sorry, something went wrong. Please try again.',
-              }
-            : message
-        )
-      );
-    } finally {
-      setIsThinking(false);
-      abortControllerRef.current = null;
+      await sendMessage({ text });
+    } catch (err) {
+      console.error('CHAT ERROR:', err);
     }
-  };
-
-  const handleStop = () => {
-    abortControllerRef.current?.abort();
-  };
-
-  const handleRetry = () => {
-    setError(false);
   };
 
   return (
@@ -206,74 +50,135 @@ export default function Chat() {
         Ask us anything about our services.
       </p>
 
-      <div className="relative mt-6">
-        <div
-          ref={messagesContainerRef}
-          onScroll={handleScroll}
-          className="max-h-[400px] min-h-[200px] space-y-4 overflow-y-auto rounded-xl bg-cream p-3 sm:p-4"
-        >
-          {messages.length === 0 && !isThinking && (
-            <p className="text-sm text-forest/50">
-              Start a conversation...
-            </p>
-          )}
+      <div className="mt-6 max-h-[450px] min-h-[200px] space-y-4 overflow-y-auto rounded-xl bg-cream p-3 sm:p-4">
+        {messages.length === 0 && (
+          <p className="text-sm text-forest/50">
+            Start a conversation...
+          </p>
+        )}
 
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={
-                message.role === 'user'
-                  ? 'ml-auto max-w-[90%] break-words rounded-xl bg-forest px-4 py-3 text-sm text-white sm:max-w-[80%]'
-                  : 'mr-auto max-w-[90%] break-words rounded-xl bg-white px-4 py-3 text-sm text-forest shadow-sm sm:max-w-[80%]'
+        {messages.map((message) => (
+          <div key={message.id} className="space-y-3">
+            {message.parts.map((rawPart, index) => {
+              // AI SDK message parts can contain text or tool results.
+              const part = rawPart as any;
+
+              if (part.type === 'text') {
+                if (!part.text) return null;
+
+                return (
+                  <div
+                    key={`${message.id}-text-${index}`}
+                    className={
+                      message.role === 'user'
+                        ? 'ml-auto max-w-[90%] whitespace-pre-wrap break-words rounded-xl bg-forest px-4 py-3 text-sm text-white sm:max-w-[80%]'
+                        : 'mr-auto max-w-[90%] whitespace-pre-wrap break-words rounded-xl bg-white px-4 py-3 text-sm text-forest shadow-sm sm:max-w-[80%]'
+                    }
+                  >
+                    {part.text}
+                  </div>
+                );
               }
-            >
-              {message.text}
-            </div>
-          ))}
 
-          {isThinking && (
-            <div className="flex items-center gap-2 text-sm text-forest/50">
-              <span>Generating</span>
+              if (part.type !== 'tool-recommendService') {
+                return null;
+              }
 
-              <span className="flex gap-1">
-                <span className="animate-pulse">.</span>
-                <span className="animate-pulse [animation-delay:150ms]">
-                  .
-                </span>
-                <span className="animate-pulse [animation-delay:300ms]">
-                  .
-                </span>
-              </span>
-            </div>
-          )}
+              return (
+                <div
+                  key={`${message.id}-tool-${index}`}
+                  className="mr-auto w-full max-w-[90%] rounded-xl border border-forest/15 bg-white p-4 text-sm text-forest shadow-sm sm:max-w-[85%]"
+                >
+                  <p className="font-display text-lg italic">
+                    Aura Service Recommendation
+                  </p>
 
-          <div ref={messagesEndRef} />
-        </div>
+                  {part.state === 'input-streaming' && (
+                    <div className="mt-3 rounded-lg bg-cream p-3">
+                      <p className="font-medium">
+                        Understanding your request...
+                      </p>
+                      <p className="mt-1 text-forest/60">
+                        Aura is preparing the service recommendation.
+                      </p>
+                    </div>
+                  )}
 
-        {!isAtBottom && (
-          <button
-            type="button"
-            onClick={scrollToLatest}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-forest px-4 py-2 text-xs text-white shadow-md"
-          >
-            ↓ Jump to latest
-          </button>
+                  {part.state === 'input-available' && (
+                    <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                      <p className="font-medium">
+                        Finding a suitable service
+                      </p>
+                      <p className="mt-1">
+                        Requested category:{' '}
+                        {part.input?.category ?? 'Not provided'}
+                      </p>
+                      <p className="mt-1 text-forest/60">
+                        Checking Aura’s available services...
+                      </p>
+                    </div>
+                  )}
+
+                  {part.state === 'output-available' && (
+                    <div className="mt-3 rounded-lg border border-forest/15 bg-cream p-4">
+                      <p className="text-xs uppercase tracking-wider text-forest/60">
+                        Recommended service
+                      </p>
+
+                      <h3 className="mt-2 font-display text-xl">
+                        {part.output?.serviceName}
+                      </h3>
+
+                      <p className="mt-2 leading-6">
+                        {part.output?.description}
+                      </p>
+
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-forest/10 pt-3">
+                        <span className="rounded-full bg-white px-3 py-1 text-xs capitalize">
+                          {part.output?.category}
+                        </span>
+
+                        <span className="text-xs text-forest/70">
+                          Duration: {part.output?.duration}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {part.state === 'output-error' && (
+                    <div
+                      role="alert"
+                      className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-red-800"
+                    >
+                      <p className="font-medium">
+                        We couldn’t complete this recommendation.
+                      </p>
+                      <p className="mt-1">
+                        {part.errorText ||
+                          'Something went wrong. Please try again.'}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        {isThinking && (
+          <div className="flex items-center gap-2 text-sm text-forest/50">
+            <span>Aura is thinking</span>
+            <span className="animate-pulse">...</span>
+          </div>
         )}
       </div>
 
       {error && (
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-clay/10 px-4 py-3 text-sm text-forest">
-          <span>
-            Something went wrong. Please try again.
-          </span>
-
-          <button
-            type="button"
-            onClick={handleRetry}
-            className="shrink-0 underline"
-          >
-            Dismiss
-          </button>
+        <div
+          role="alert"
+          className="mt-3 rounded-xl bg-clay/10 px-4 py-3 text-sm text-forest"
+        >
+          Something went wrong. Please try again.
         </div>
       )}
 
@@ -283,7 +188,7 @@ export default function Chat() {
       >
         <input
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(event) => setInput(event.target.value)}
           placeholder="Ask about our services..."
           disabled={isThinking}
           className="min-w-0 flex-1 rounded-xl border border-forest/15 bg-white px-4 py-3 text-sm outline-none focus:border-forest disabled:opacity-60"
@@ -292,7 +197,7 @@ export default function Chat() {
         {isThinking ? (
           <button
             type="button"
-            onClick={handleStop}
+            onClick={stop}
             className="w-full rounded-xl bg-clay px-5 py-3 text-sm text-white sm:w-auto"
           >
             Stop
@@ -300,7 +205,8 @@ export default function Chat() {
         ) : (
           <button
             type="submit"
-            className="w-full rounded-xl bg-forest px-5 py-3 text-sm text-white sm:w-auto"
+            disabled={!input.trim()}
+            className="w-full rounded-xl bg-forest px-5 py-3 text-sm text-white disabled:opacity-50 sm:w-auto"
           >
             Send
           </button>

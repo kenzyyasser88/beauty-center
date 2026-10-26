@@ -1,101 +1,92 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { AI_CONFIG, CHAT_CONFIG } from '@/lib/ai/config';
+import {
+  convertToModelMessages,
+  stepCountIs,
+  streamText,
+  type UIMessage,
+} from 'ai';
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
+import { z } from 'zod';
+import { AI_CONFIG } from '@/lib/ai/config';
 
-const genAI = new GoogleGenerativeAI(
-  process.env.GEMINI_API_KEY!
-);
+const google = createGoogleGenerativeAI({
+  apiKey: process.env.GEMINI_API_KEY,
+});
+
+const recommendServiceSchema = z.object({
+  category: z
+    .string()
+    .describe(
+      'The beauty service category the customer wants: facial, massage, or nails',
+    ),
+});
+
+const services = {
+  facial: {
+    serviceName: 'Signature Facial',
+    description:
+      "A facial treatment designed around the customer's skincare needs.",
+    duration: '60 minutes',
+    category: 'facial',
+  },
+  massage: {
+    serviceName: 'Deep Tissue Massage',
+    description:
+      'A targeted massage focused on areas that feel tense or tight.',
+    duration: '60 minutes',
+    category: 'massage',
+  },
+  nails: {
+    serviceName: 'Gel Manicure',
+    description:
+      'A manicure with shaped nails and a long-lasting gel finish.',
+    duration: '60 minutes',
+    category: 'nails',
+  },
+};
 
 export async function POST(req: Request) {
   try {
-    const { messages } = await req.json();
+    const { messages }: { messages: UIMessage[] } = await req.json();
 
-    const model = genAI.getGenerativeModel({
-      model: AI_CONFIG.model,
-      systemInstruction: AI_CONFIG.systemPrompt,
-    });
+    const result = streamText({
+      model: google(AI_CONFIG.model),
+      system: `${AI_CONFIG.systemPrompt}
 
-    const history = messages
-      .slice(0, -1)
-      .map((message: any) => ({
-        role: message.role === 'assistant' ? 'model' : 'user',
-        parts: [
-          {
-            text:
-              message.parts
-                ?.filter((part: any) => part.type === 'text')
-                ?.map((part: any) => part.text)
-                ?.join(' ') || '',
-          },
-        ],
-      }));
+When a customer asks for a specific beauty service or needs help choosing one,
+use the recommendService tool. The supported categories are facial, massage,
+and nails. Do not invent services that are not in the tool results.`,
+      messages: await convertToModelMessages(messages),
+      tools: {
+        recommendService: {
+          description:
+            'Recommend an existing Aura Beauty Center service based on the customer’s needs.',
+          inputSchema: recommendServiceSchema,
+          execute: async ({ category }) => {
+            const normalizedCategory = category.toLowerCase().trim();
 
-    const lastMessage = messages[messages.length - 1];
+            const service =
+              services[normalizedCategory as keyof typeof services];
 
-    const userText =
-      lastMessage?.parts
-        ?.filter((part: any) => part.type === 'text')
-        ?.map((part: any) => part.text)
-        ?.join(' ') || '';
-
-    const chat = model.startChat({
-      history,
-    });
-
-    const result = await chat.sendMessageStream(userText);
-
-    const encoder = new TextEncoder();
-
-    const stream = new ReadableStream({
-      async start(controller) {
-        try {
-          let totalText = '';
-
-          for await (const chunk of result.stream) {
-            const text = chunk.text();
-
-            if (!text) continue;
-
-            totalText += text;
-
-            if (
-              totalText.length >
-              CHAT_CONFIG.maxResponseLength
-            ) {
-              const remaining =
-                CHAT_CONFIG.maxResponseLength -
-                (totalText.length - text.length);
-
-              controller.enqueue(
-                encoder.encode(text.slice(0, remaining))
+            if (!service) {
+              throw new Error(
+                'We could not find a matching service. Please try facial, massage, or nails.',
               );
-
-              break;
             }
 
-            controller.enqueue(
-              encoder.encode(text)
-            );
-          }
-
-          controller.close();
-        } catch (error) {
-          controller.error(error);
-        }
+            return service;
+          },
+        },
       },
+      stopWhen: stepCountIs(3),
     });
 
-    return new Response(stream, {
-      headers: {
-        'Content-Type': 'text/plain; charset=utf-8',
-        'Cache-Control': 'no-cache',
-      },
-    });
+    return result.toUIMessageStreamResponse();
   } catch (error) {
     console.error('CHAT ERROR:', error);
 
     return Response.json(
-      { error: 'Something went wrong.' },
-      { status: 500 }
+      { error: 'Something went wrong. Please try again.' },
+      { status: 500 },
     );
   }
 }
